@@ -1,0 +1,6 @@
+## Interface: 100105
+## Title: AH Crafter Price
+## Notes: Exibe custo do item craftado e reagentes na AH
+## Author: Ygor Galbier
+## Version: 1.0
+AHCrafterPrice.lua
