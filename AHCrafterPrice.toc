@@ -1,4 +1,4 @@
-## Interface: 100105
+## Interface: 120000
 ## Title: AH Crafter Price
 ## Notes: Exibe custo do item craftado e reagentes na AH
 ## Author: Ygor Galbier
