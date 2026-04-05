@@ -3,4 +3,5 @@
 ## Notes: Exibe custo do item craftado e reagentes na AH
 ## Author: Ygor Galbier
 ## Version: 1.0
+## SavedVariables: AHCrafterPriceDB
 AHCrafterPrice.lua
