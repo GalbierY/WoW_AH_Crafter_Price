@@ -385,14 +385,10 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
         end
     end
 
-    if pricedReagents > 0 then
-        if pricedReagents < totalReagents then
-            statusLines[#statusLines + 1] = string.format("Total reagentes (parcial): %s", FormatCopper(totalReagentCost))
-        else
-            statusLines[#statusLines + 1] = string.format("Total reagentes: %s", FormatCopper(totalReagentCost))
-        end
+    if pricedReagents < totalReagents then
+        statusLines[#statusLines + 1] = string.format("Total reagentes (parcial): %s", FormatKnownCopper(totalReagentCost))
     else
-        statusLines[#statusLines + 1] = "Total reagentes: sem dados em cache"
+        statusLines[#statusLines + 1] = string.format("Total reagentes: %s", FormatKnownCopper(totalReagentCost))
     end
 
     local itemEntry, itemPrice, itemFresh, itemAge = GetCachedAuctionPriceInfo(recipeData.itemName, allowStale)
@@ -404,11 +400,9 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
             itemTag = string.format(" (cache %s)", FormatCacheAge(itemAge))
         end
         statusLines[#statusLines + 1] = string.format("Preco item AH: %s%s", FormatCopper(itemPrice), itemTag)
-        if totalReagentCost > 0 then
-            local profit = itemPrice - totalReagentCost
-            local profitLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
-            statusLines[#statusLines + 1] = string.format("%s: %s", profitLabel, BuildSignedProfitText(profit))
-        end
+        local profit = itemPrice - totalReagentCost
+        local profitLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
+        statusLines[#statusLines + 1] = string.format("%s: %s", profitLabel, BuildSignedProfitText(profit))
     elseif itemEntry then
         missingData = missingData + 1
         local itemTag = ""
@@ -427,7 +421,7 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
     local hasAnyData = (pricedReagents > 0) or itemEntry
     local missingReagents = math.max(0, totalReagents - pricedReagents)
     local summary = {
-        reagentCost = pricedReagents > 0 and totalReagentCost or nil,
+        reagentCost = totalReagentCost,
         itemPrice = (itemEntry and itemPrice) and itemPrice or nil,
         missingReagents = missingReagents,
         staleEntries = staleEntries,
@@ -1159,7 +1153,6 @@ UpdateProfessionPriceDisplay = function()
     local totalReagents = #reagentEntries
     local results = {}
     local pending = totalReagents
-    local progressPricedReagents = 0
     local progressMissingReagents = 0
     local progressReagentCost = 0
 
@@ -1171,7 +1164,6 @@ UpdateProfessionPriceDisplay = function()
             pending = pending - 1
 
             if price then
-                progressPricedReagents = progressPricedReagents + 1
                 progressReagentCost = progressReagentCost + price * qty
             else
                 progressMissingReagents = progressMissingReagents + 1
@@ -1180,7 +1172,7 @@ UpdateProfessionPriceDisplay = function()
             local completed = totalReagents - pending
             professionPriceFrame.status:SetText(string.format("Pesquisando precos na AH... %d/%d reagentes", completed, totalReagents))
             SetProfessionSummaryValues({
-                reagentCost = progressPricedReagents > 0 and progressReagentCost or nil,
+                reagentCost = progressReagentCost,
                 missingReagents = progressMissingReagents,
                 partial = true,
                 source = string.format("Consultando reagentes: %d/%d", completed, totalReagents),
@@ -1206,11 +1198,11 @@ UpdateProfessionPriceDisplay = function()
                         missingReagents = missingReagents + 1
                     end
                 end
-                statusLines[#statusLines + 1] = string.format("Total reagentes: %s", FormatCopper(totalReagentCost))
+                statusLines[#statusLines + 1] = string.format("Total reagentes: %s", FormatKnownCopper(totalReagentCost))
 
                 professionPriceFrame.status:SetText("Pesquisando preco do item final na AH...")
                 SetProfessionSummaryValues({
-                    reagentCost = pricedReagents > 0 and totalReagentCost or nil,
+                    reagentCost = totalReagentCost,
                     missingReagents = missingReagents,
                     partial = true,
                     source = "Fonte: AH ao vivo",
@@ -1220,11 +1212,9 @@ UpdateProfessionPriceDisplay = function()
                 EnqueueAuctionQuery(recipeData.itemName, function(itemPrice)
                     if itemPrice then
                         statusLines[#statusLines + 1] = string.format("Preco item AH: %s", FormatCopper(itemPrice))
-                        if totalReagentCost > 0 then
-                            local profit = itemPrice - totalReagentCost
-                            local profitLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
-                            statusLines[#statusLines + 1] = string.format("%s: %s", profitLabel, BuildSignedProfitText(profit))
-                        end
+                        local profit = itemPrice - totalReagentCost
+                        local profitLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
+                        statusLines[#statusLines + 1] = string.format("%s: %s", profitLabel, BuildSignedProfitText(profit))
                     else
                         statusLines[#statusLines + 1] = "Preco do item: sem preco"
                     end
@@ -1232,7 +1222,7 @@ UpdateProfessionPriceDisplay = function()
                         statusLines[#statusLines + 1] = "Alguns reagentes nao tem preco disponivel."
                     end
                     SetProfessionSummaryValues({
-                        reagentCost = pricedReagents > 0 and totalReagentCost or nil,
+                        reagentCost = totalReagentCost,
                         itemPrice = itemPrice,
                         missingReagents = missingReagents,
                         partial = missingReagents > 0 or itemPrice == nil,
@@ -1383,7 +1373,7 @@ local function ScanAllRecipes()
                         end
                     end
                     local itemPrice = results[recipeName]
-                    local profit = (itemPrice and totalReagentCost > 0) and (itemPrice - totalReagentCost) or nil
+                    local profit = itemPrice and (itemPrice - totalReagentCost) or nil
                     table.insert(recipeSummaries, {
                         name = recipeName,
                         reagentCost = totalReagentCost,
@@ -1408,7 +1398,7 @@ local function ScanAllRecipes()
                     local priceText = summary.itemPrice and FormatCopper(summary.itemPrice) or "sem preço do item"
                     local profitText = summary.profit and BuildSignedProfitText(summary.profit) or "sem lucro calculado"
                     local missingText = summary.missing and " (faltam dados de reagentes)" or ""
-                    Print(string.format("%s: reagentes %s, item %s, resultado %s%s", summary.name, FormatCopper(summary.reagentCost), priceText, profitText, missingText))
+                    Print(string.format("%s: reagentes %s, item %s, resultado %s%s", summary.name, FormatKnownCopper(summary.reagentCost), priceText, profitText, missingText))
                 end
             end
         end)
@@ -1443,11 +1433,11 @@ local function PrintRecipeCosts(recipeName)
                     local info = reagentPrices[sortedEntry.name] or { qty = sortedEntry.qty, price = nil }
                     Print(string.format("  %s x%d = %s cada", sortedEntry.name, info.qty, FormatCopper(info.price)))
                 end
-                Print("Custo total dos reagentes: " .. FormatCopper(totalReagentCost))
+                Print("Custo total dos reagentes: " .. FormatKnownCopper(totalReagentCost))
 
                 EnqueueAuctionQuery(recipe.itemName, function(itemPrice)
                     Print("Preço AH do item craftado: " .. FormatCopper(itemPrice))
-                    if itemPrice and totalReagentCost > 0 then
+                    if itemPrice then
                         local profit = itemPrice - totalReagentCost
                         local marginLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
                         Print(marginLabel .. ": " .. BuildSignedProfitText(profit))
