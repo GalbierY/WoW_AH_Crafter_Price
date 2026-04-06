@@ -104,6 +104,21 @@ local function BuildSignedProfitText(profit)
     return "0g 00s 00c"
 end
 
+local function BuildReagentCostText(qty, unitPrice)
+    if not unitPrice or unitPrice <= 0 then
+        return "sem preco"
+    end
+
+    local reagentQty = math.max(tonumber(qty or 0) or 0, 0)
+    local totalPrice = unitPrice * reagentQty
+
+    if reagentQty > 1 then
+        return string.format("%s (%s cada)", FormatKnownCopper(totalPrice), FormatKnownCopper(unitPrice))
+    end
+
+    return FormatKnownCopper(totalPrice)
+end
+
 local function BuildSortedReagentEntries(reagents)
     local entries = {}
     for name, qty in pairs(reagents or {}) do
@@ -370,7 +385,7 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
                 staleEntries = staleEntries + 1
                 cacheTag = string.format(" (cache %s)", FormatCacheAge(ageSeconds))
             end
-            statusLines[#statusLines + 1] = string.format("%s x%d = %s%s", reagentName, qty, FormatCopper(price), cacheTag)
+            statusLines[#statusLines + 1] = string.format("%s x%d = %s%s", reagentName, qty, BuildReagentCostText(qty, price), cacheTag)
         elseif hasEntry then
             missingData = missingData + 1
             local cacheTag = ""
@@ -1192,7 +1207,7 @@ UpdateProfessionPriceDisplay = function()
                     if linePrice then
                         pricedReagents = pricedReagents + 1
                         totalReagentCost = totalReagentCost + linePrice * lineQty
-                        statusLines[#statusLines + 1] = string.format("%s x%d = %s", name, lineQty, FormatCopper(linePrice))
+                        statusLines[#statusLines + 1] = string.format("%s x%d = %s", name, lineQty, BuildReagentCostText(lineQty, linePrice))
                     else
                         statusLines[#statusLines + 1] = string.format("%s x%d = sem preco", name, lineQty)
                         missingReagents = missingReagents + 1
@@ -1431,7 +1446,7 @@ local function PrintRecipeCosts(recipeName)
             if pending == 0 then
                 for _, sortedEntry in ipairs(reagentEntries) do
                     local info = reagentPrices[sortedEntry.name] or { qty = sortedEntry.qty, price = nil }
-                    Print(string.format("  %s x%d = %s cada", sortedEntry.name, info.qty, FormatCopper(info.price)))
+                    Print(string.format("  %s x%d = %s", sortedEntry.name, info.qty, BuildReagentCostText(info.qty, info.price)))
                 end
                 Print("Custo total dos reagentes: " .. FormatKnownCopper(totalReagentCost))
 
