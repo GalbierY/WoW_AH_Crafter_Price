@@ -51,14 +51,159 @@ local function Print(msg)
     end
 end
 
+local function FormatKnownCopper(copper)
+    local value = math.floor(tonumber(copper) or 0)
+    if value < 0 then
+        value = 0
+    end
+    local gold = math.floor(value / 10000)
+    local silver = math.floor((value % 10000) / 100)
+    local copperRem = value % 100
+    return string.format("%dg %02ds %02dc", gold, silver, copperRem)
+end
+
 local function FormatCopper(copper)
     if not copper or copper <= 0 then
-        return "sem preço"
+        return "sem preco"
     end
-    local gold = math.floor(copper / 10000)
-    local silver = math.floor((copper % 10000) / 100)
-    local copperRem = copper % 100
-    return string.format("%dg %02ds %02dc", gold, silver, copperRem)
+    return FormatKnownCopper(copper)
+end
+
+local function ColorText(text, colorHex)
+    if not colorHex or colorHex == "" then
+        return tostring(text or "")
+    end
+    return string.format("|cff%s%s|r", colorHex, tostring(text or ""))
+end
+
+local function BuildProfitLine(reagentCost, itemPrice)
+    if reagentCost == nil or itemPrice == nil then
+        return "Resultado provavel", "sem calculo", "ffd166"
+    end
+
+    local profit = itemPrice - reagentCost
+    if profit > 0 then
+        return "Lucro provavel", "+" .. FormatKnownCopper(profit), "53ff53"
+    end
+    if profit < 0 then
+        return "Perda provavel", "-" .. FormatKnownCopper(math.abs(profit)), "ff6b6b"
+    end
+    return "Resultado provavel", "0g 00s 00c", "ffd166"
+end
+
+local function BuildSignedProfitText(profit)
+    if profit == nil then
+        return "sem calculo"
+    end
+    if profit > 0 then
+        return "+" .. FormatKnownCopper(profit)
+    end
+    if profit < 0 then
+        return "-" .. FormatKnownCopper(math.abs(profit))
+    end
+    return "0g 00s 00c"
+end
+
+local function BuildSortedReagentEntries(reagents)
+    local entries = {}
+    for name, qty in pairs(reagents or {}) do
+        entries[#entries + 1] = {
+            name = tostring(name),
+            qty = tonumber(qty or 0) or 0,
+        }
+    end
+    table.sort(entries, function(a, b)
+        return string.lower(a.name) < string.lower(b.name)
+    end)
+    return entries
+end
+
+local function EnsureProfessionPanelDB()
+    if type(db) ~= "table" then
+        return nil
+    end
+    if type(db.professionPanel) ~= "table" then
+        db.professionPanel = {}
+    end
+    return db.professionPanel
+end
+
+local function ApplyProfessionPanelPosition(parent)
+    if not professionPriceFrame then
+        return
+    end
+
+    local panelDB = EnsureProfessionPanelDB()
+    professionPriceFrame:ClearAllPoints()
+
+    if panelDB and tonumber(panelDB.x) and tonumber(panelDB.y) then
+        professionPriceFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", tonumber(panelDB.x), tonumber(panelDB.y))
+        return
+    end
+
+    professionPriceFrame:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -20, -80)
+end
+
+local function SaveProfessionPanelPosition()
+    if not professionPriceFrame then
+        return
+    end
+
+    local panelDB = EnsureProfessionPanelDB()
+    if not panelDB then
+        return
+    end
+
+    local left = professionPriceFrame:GetLeft()
+    local top = professionPriceFrame:GetTop()
+    if not left or not top then
+        return
+    end
+
+    panelDB.x = math.floor(left + 0.5)
+    panelDB.y = math.floor(top + 0.5)
+end
+
+local function SetProfessionSummaryValues(summary)
+    if not professionPriceFrame or not professionPriceFrame.summaryCraft then
+        return
+    end
+
+    summary = summary or {}
+    local reagentCost = summary.reagentCost
+    local itemPrice = summary.itemPrice
+    local missingReagents = tonumber(summary.missingReagents or 0) or 0
+    local staleEntries = tonumber(summary.staleEntries or 0) or 0
+    local source = tostring(summary.source or "")
+    local partial = not not summary.partial
+    local note = tostring(summary.note or "")
+
+    local reagentText = reagentCost ~= nil and FormatKnownCopper(reagentCost) or "sem preco"
+    local itemText = itemPrice ~= nil and FormatKnownCopper(itemPrice) or "sem preco"
+    local resultLabel, resultText, resultColor = BuildProfitLine(reagentCost, itemPrice)
+
+    professionPriceFrame.summaryCraft:SetText("Gasto crafting: " .. ColorText(reagentText, "ffd27f"))
+    professionPriceFrame.summaryItem:SetText("Valor item AH: " .. ColorText(itemText, "8fd3ff"))
+    professionPriceFrame.summaryResult:SetText(resultLabel .. ": " .. ColorText(resultText, resultColor))
+
+    local hints = {}
+    if source ~= "" then
+        hints[#hints + 1] = source
+    end
+    if partial then
+        hints[#hints + 1] = "estimativa parcial"
+    end
+    if missingReagents > 0 then
+        hints[#hints + 1] = string.format("faltam %d reagente(s)", missingReagents)
+    end
+    if staleEntries > 0 then
+        hints[#hints + 1] = string.format("cache antigo em %d item(ns)", staleEntries)
+    end
+    if note ~= "" then
+        hints[#hints + 1] = note
+    end
+
+    professionPriceFrame.summaryHint:SetText(#hints > 0 and ColorText(table.concat(hints, " | "), "a0a0a0") or "")
 end
 
 local function IsRetailAH()
@@ -206,12 +351,14 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
     local statusLines = {}
     local totalReagentCost = 0
     local pricedReagents = 0
-    local totalReagents = 0
     local missingData = 0
     local staleEntries = 0
+    local reagentEntries = BuildSortedReagentEntries(recipeData.reagents)
+    local totalReagents = #reagentEntries
 
-    for reagentName, qty in pairs(recipeData.reagents) do
-        totalReagents = totalReagents + 1
+    for _, reagentEntry in ipairs(reagentEntries) do
+        local reagentName = reagentEntry.name
+        local qty = reagentEntry.qty
         local hasEntry, price, isFresh, ageSeconds = GetCachedAuctionPriceInfo(reagentName, allowStale)
 
         if hasEntry and price then
@@ -249,6 +396,7 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
     end
 
     local itemEntry, itemPrice, itemFresh, itemAge = GetCachedAuctionPriceInfo(recipeData.itemName, allowStale)
+    local itemMissingNote = ""
     if itemEntry and itemPrice then
         local itemTag = ""
         if not itemFresh then
@@ -257,7 +405,9 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
         end
         statusLines[#statusLines + 1] = string.format("Preco item AH: %s%s", FormatCopper(itemPrice), itemTag)
         if totalReagentCost > 0 then
-            statusLines[#statusLines + 1] = string.format("Lucro estimado: %s", FormatCopper(itemPrice - totalReagentCost))
+            local profit = itemPrice - totalReagentCost
+            local profitLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
+            statusLines[#statusLines + 1] = string.format("%s: %s", profitLabel, BuildSignedProfitText(profit))
         end
     elseif itemEntry then
         missingData = missingData + 1
@@ -267,13 +417,24 @@ local function BuildCachedProfessionStatusText(recipeData, allowStale)
             itemTag = string.format(" (cache %s)", FormatCacheAge(itemAge))
         end
         statusLines[#statusLines + 1] = "Preco item AH: sem preco" .. itemTag
+        itemMissingNote = "sem preco do item"
     else
         missingData = missingData + 1
         statusLines[#statusLines + 1] = "Preco item AH: sem cache"
+        itemMissingNote = "item sem cache"
     end
 
     local hasAnyData = (pricedReagents > 0) or itemEntry
-    return table.concat(statusLines, "\n"), hasAnyData, missingData, staleEntries
+    local missingReagents = math.max(0, totalReagents - pricedReagents)
+    local summary = {
+        reagentCost = pricedReagents > 0 and totalReagentCost or nil,
+        itemPrice = (itemEntry and itemPrice) and itemPrice or nil,
+        missingReagents = missingReagents,
+        staleEntries = staleEntries,
+        partial = (missingReagents > 0) or not (itemEntry and itemPrice),
+        note = itemMissingNote,
+    }
+    return table.concat(statusLines, "\n"), hasAnyData, missingData, staleEntries, summary
 end
 
 local function SaveCachedAuctionPrice(search, price)
@@ -680,8 +841,7 @@ CreateProfessionPriceFrame = function()
         if professionPriceFrame:GetParent() ~= parent then
             professionPriceFrame:SetParent(parent)
         end
-        professionPriceFrame:ClearAllPoints()
-        professionPriceFrame:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -20, -80)
+        ApplyProfessionPanelPosition(parent)
         return
     end
 
@@ -689,8 +849,18 @@ CreateProfessionPriceFrame = function()
     professionPriceFrame:SetFrameStrata("DIALOG")
     professionPriceFrame:SetFrameLevel(1000)
     professionPriceFrame:SetClampedToScreen(true)
-    professionPriceFrame:SetSize(280, 150)
-    professionPriceFrame:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -20, -80)
+    professionPriceFrame:SetSize(330, 230)
+    professionPriceFrame:SetMovable(true)
+    professionPriceFrame:EnableMouse(true)
+    professionPriceFrame:RegisterForDrag("LeftButton")
+    professionPriceFrame:SetScript("OnDragStart", function(self)
+        self:StartMoving()
+    end)
+    professionPriceFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        SaveProfessionPanelPosition()
+    end)
+    ApplyProfessionPanelPosition(parent)
     professionPriceFrame:SetBackdrop({
         bgFile = "Interface/Tooltips/UI-Tooltip-Background",
         edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
@@ -707,8 +877,30 @@ CreateProfessionPriceFrame = function()
     professionPriceFrame.title:SetPoint("TOPLEFT", 8, -8)
     professionPriceFrame.title:SetText("AH Price")
 
+    professionPriceFrame.summaryCraft = professionPriceFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    professionPriceFrame.summaryCraft:SetPoint("TOPLEFT", professionPriceFrame.title, "BOTTOMLEFT", 0, -8)
+    professionPriceFrame.summaryCraft:SetJustifyH("LEFT")
+    professionPriceFrame.summaryCraft:SetText("Gasto crafting: sem preco")
+
+    professionPriceFrame.summaryItem = professionPriceFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    professionPriceFrame.summaryItem:SetPoint("TOPLEFT", professionPriceFrame.summaryCraft, "BOTTOMLEFT", 0, -4)
+    professionPriceFrame.summaryItem:SetJustifyH("LEFT")
+    professionPriceFrame.summaryItem:SetText("Valor item AH: sem preco")
+
+    professionPriceFrame.summaryResult = professionPriceFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    professionPriceFrame.summaryResult:SetPoint("TOPLEFT", professionPriceFrame.summaryItem, "BOTTOMLEFT", 0, -4)
+    professionPriceFrame.summaryResult:SetJustifyH("LEFT")
+    professionPriceFrame.summaryResult:SetText("Resultado provavel: sem calculo")
+
+    professionPriceFrame.summaryHint = professionPriceFrame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    professionPriceFrame.summaryHint:SetPoint("TOPLEFT", professionPriceFrame.summaryResult, "BOTTOMLEFT", 0, -4)
+    professionPriceFrame.summaryHint:SetPoint("TOPRIGHT", professionPriceFrame, "TOPRIGHT", -8, 0)
+    professionPriceFrame.summaryHint:SetJustifyH("LEFT")
+    professionPriceFrame.summaryHint:SetNonSpaceWrap(true)
+    professionPriceFrame.summaryHint:SetText("")
+
     professionPriceFrame.status = professionPriceFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    professionPriceFrame.status:SetPoint("TOPLEFT", professionPriceFrame.title, "BOTTOMLEFT", 0, -6)
+    professionPriceFrame.status:SetPoint("TOPLEFT", professionPriceFrame.summaryHint, "BOTTOMLEFT", 0, -8)
     professionPriceFrame.status:SetPoint("BOTTOMRIGHT", professionPriceFrame, "BOTTOMRIGHT", -8, 8)
     professionPriceFrame.status:SetJustifyH("LEFT")
     professionPriceFrame.status:SetJustifyV("TOP")
@@ -897,6 +1089,10 @@ UpdateProfessionPriceDisplay = function()
 
     local recipeID, recipeNameHint = GetSelectedProfessionRecipeID()
     if not recipeID or recipeID == 0 then
+        SetProfessionSummaryValues({
+            source = "Sem receita selecionada",
+            partial = true,
+        })
         professionPriceFrame.status:SetText("Selecione uma receita na aba de profissao.")
         lastProfessionRecipeID = nil
         lastProfessionAHOpen = nil
@@ -910,6 +1106,10 @@ UpdateProfessionPriceDisplay = function()
 
     local recipeData = BuildProfessionRecipeData(recipeID, recipeNameHint)
     if not recipeData or not next(recipeData.reagents) then
+        SetProfessionSummaryValues({
+            source = "Receita sem reagentes validos",
+            partial = true,
+        })
         professionPriceFrame.status:SetText("Nao foi possivel obter os reagentes desta receita.")
         lastProfessionRecipeID = nil
         lastProfessionAHOpen = nil
@@ -921,7 +1121,14 @@ UpdateProfessionPriceDisplay = function()
     lastProfessionAHOpen = ahOpen
 
     if not ahOpen then
-        local cachedText, hasAnyData, missingData, staleEntries = BuildCachedProfessionStatusText(recipeData, true)
+        local cachedText, hasAnyData, missingData, staleEntries, cachedSummary = BuildCachedProfessionStatusText(recipeData, true)
+        if cachedSummary then
+            cachedSummary.source = "Fonte: cache local (AH fechada)"
+            if missingData > 0 and cachedSummary.note == "" then
+                cachedSummary.note = string.format("itens sem cache: %d", missingData)
+            end
+            SetProfessionSummaryValues(cachedSummary)
+        end
         if hasAnyData then
             local footer = "Fonte: cache local (AH fechada). Abra a AH para atualizar."
             if staleEntries > 0 then
@@ -932,49 +1139,106 @@ UpdateProfessionPriceDisplay = function()
             end
             professionPriceFrame.status:SetText(cachedText .. "\n" .. footer)
         else
+            SetProfessionSummaryValues({
+                source = "Fonte: cache local (AH fechada)",
+                partial = true,
+                note = "sem dados em cache",
+            })
             professionPriceFrame.status:SetText("Sem dados em cache para esta receita.\nAbra a casa de leiloes para pesquisar precos.")
         end
         return
     end
 
+    SetProfessionSummaryValues({
+        source = "Buscando preco na AH ao vivo",
+        partial = true,
+    })
     professionPriceFrame.status:SetText("Pesquisando precos na AH...")
 
-    local totalReagentCost = 0
+    local reagentEntries = BuildSortedReagentEntries(recipeData.reagents)
+    local totalReagents = #reagentEntries
     local results = {}
-    local pending = 0
+    local pending = totalReagents
+    local progressPricedReagents = 0
+    local progressMissingReagents = 0
+    local progressReagentCost = 0
 
-    for reagentName, qty in pairs(recipeData.reagents) do
-        pending = pending + 1
+    for _, reagentEntry in ipairs(reagentEntries) do
+        local reagentName = reagentEntry.name
+        local qty = reagentEntry.qty
         EnqueueAuctionQuery(reagentName, function(price)
             results[reagentName] = { qty = qty, price = price }
             pending = pending - 1
+
+            if price then
+                progressPricedReagents = progressPricedReagents + 1
+                progressReagentCost = progressReagentCost + price * qty
+            else
+                progressMissingReagents = progressMissingReagents + 1
+            end
+
+            local completed = totalReagents - pending
+            professionPriceFrame.status:SetText(string.format("Pesquisando precos na AH... %d/%d reagentes", completed, totalReagents))
+            SetProfessionSummaryValues({
+                reagentCost = progressPricedReagents > 0 and progressReagentCost or nil,
+                missingReagents = progressMissingReagents,
+                partial = true,
+                source = string.format("Consultando reagentes: %d/%d", completed, totalReagents),
+                note = pending > 0 and "aguarde resultado final" or "",
+            })
+
             if pending == 0 then
                 local statusLines = {}
-                local missing = false
-                for name, info in pairs(results) do
-                    if info.price then
-                        totalReagentCost = totalReagentCost + info.price * info.qty
-                        statusLines[#statusLines + 1] = string.format("%s x%d = %s", name, info.qty, FormatCopper(info.price))
+                local missingReagents = 0
+                local pricedReagents = 0
+                local totalReagentCost = 0
+                for _, sortedEntry in ipairs(reagentEntries) do
+                    local name = sortedEntry.name
+                    local info = results[name]
+                    local lineQty = (info and info.qty) or sortedEntry.qty
+                    local linePrice = info and info.price or nil
+                    if linePrice then
+                        pricedReagents = pricedReagents + 1
+                        totalReagentCost = totalReagentCost + linePrice * lineQty
+                        statusLines[#statusLines + 1] = string.format("%s x%d = %s", name, lineQty, FormatCopper(linePrice))
                     else
-                        statusLines[#statusLines + 1] = string.format("%s x%d = sem preco", name, info.qty)
-                        missing = true
+                        statusLines[#statusLines + 1] = string.format("%s x%d = sem preco", name, lineQty)
+                        missingReagents = missingReagents + 1
                     end
                 end
                 statusLines[#statusLines + 1] = string.format("Total reagentes: %s", FormatCopper(totalReagentCost))
+
+                professionPriceFrame.status:SetText("Pesquisando preco do item final na AH...")
+                SetProfessionSummaryValues({
+                    reagentCost = pricedReagents > 0 and totalReagentCost or nil,
+                    missingReagents = missingReagents,
+                    partial = true,
+                    source = "Fonte: AH ao vivo",
+                    note = "consultando item final",
+                })
 
                 EnqueueAuctionQuery(recipeData.itemName, function(itemPrice)
                     if itemPrice then
                         statusLines[#statusLines + 1] = string.format("Preco item AH: %s", FormatCopper(itemPrice))
                         if totalReagentCost > 0 then
                             local profit = itemPrice - totalReagentCost
-                            statusLines[#statusLines + 1] = string.format("Lucro estimado: %s", FormatCopper(profit))
+                            local profitLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
+                            statusLines[#statusLines + 1] = string.format("%s: %s", profitLabel, BuildSignedProfitText(profit))
                         end
                     else
                         statusLines[#statusLines + 1] = "Preco do item: sem preco"
                     end
-                    if missing then
+                    if missingReagents > 0 then
                         statusLines[#statusLines + 1] = "Alguns reagentes nao tem preco disponivel."
                     end
+                    SetProfessionSummaryValues({
+                        reagentCost = pricedReagents > 0 and totalReagentCost or nil,
+                        itemPrice = itemPrice,
+                        missingReagents = missingReagents,
+                        partial = missingReagents > 0 or itemPrice == nil,
+                        source = "Fonte: AH ao vivo",
+                        note = missingReagents > 0 and "resultado pode variar" or "",
+                    })
                     professionPriceFrame.status:SetText(table.concat(statusLines, "\n"))
                 end)
             end
@@ -1070,6 +1334,9 @@ local function BuildPriceScanList(recipeSet)
     for name in pairs(uniqueNames) do
         table.insert(list, name)
     end
+    table.sort(list, function(a, b)
+        return string.lower(a) < string.lower(b)
+    end)
     return list
 end
 
@@ -1139,9 +1406,9 @@ local function ScanAllRecipes()
                 end
                 for _, summary in ipairs(recipeSummaries) do
                     local priceText = summary.itemPrice and FormatCopper(summary.itemPrice) or "sem preço do item"
-                    local profitText = summary.profit and FormatCopper(summary.profit) or "sem lucro calculado"
+                    local profitText = summary.profit and BuildSignedProfitText(summary.profit) or "sem lucro calculado"
                     local missingText = summary.missing and " (faltam dados de reagentes)" or ""
-                    Print(string.format("%s: reagentes %s, item %s, lucro %s%s", summary.name, FormatCopper(summary.reagentCost), priceText, profitText, missingText))
+                    Print(string.format("%s: reagentes %s, item %s, resultado %s%s", summary.name, FormatCopper(summary.reagentCost), priceText, profitText, missingText))
                 end
             end
         end)
@@ -1157,12 +1424,14 @@ local function PrintRecipeCosts(recipeName)
 
     Print("Receita: " .. recipe.itemName)
     Print("Reagentes:")
+    local reagentEntries = BuildSortedReagentEntries(recipe.reagents)
     local reagentPrices = {}
     local totalReagentCost = 0
-    local pending = 0
+    local pending = #reagentEntries
 
-    for reagentName, qty in pairs(recipe.reagents) do
-        pending = pending + 1
+    for _, reagentEntry in ipairs(reagentEntries) do
+        local reagentName = reagentEntry.name
+        local qty = reagentEntry.qty
         EnqueueAuctionQuery(reagentName, function(price)
             reagentPrices[reagentName] = {qty = qty, price = price}
             if price then
@@ -1170,8 +1439,9 @@ local function PrintRecipeCosts(recipeName)
             end
             pending = pending - 1
             if pending == 0 then
-                for name, info in pairs(reagentPrices) do
-                    Print(string.format("  %s x%d = %s cada", name, info.qty, FormatCopper(info.price)))
+                for _, sortedEntry in ipairs(reagentEntries) do
+                    local info = reagentPrices[sortedEntry.name] or { qty = sortedEntry.qty, price = nil }
+                    Print(string.format("  %s x%d = %s cada", sortedEntry.name, info.qty, FormatCopper(info.price)))
                 end
                 Print("Custo total dos reagentes: " .. FormatCopper(totalReagentCost))
 
@@ -1179,7 +1449,8 @@ local function PrintRecipeCosts(recipeName)
                     Print("Preço AH do item craftado: " .. FormatCopper(itemPrice))
                     if itemPrice and totalReagentCost > 0 then
                         local profit = itemPrice - totalReagentCost
-                        Print("Margem estimada: " .. FormatCopper(profit))
+                        local marginLabel = profit >= 0 and "Lucro estimado" or "Perda estimada"
+                        Print(marginLabel .. ": " .. BuildSignedProfitText(profit))
                     end
                 end)
             end
@@ -1205,6 +1476,9 @@ local function EnsureDatabase()
 
     if type(db.priceCache) ~= "table" then
         db.priceCache = {}
+    end
+    if type(db.professionPanel) ~= "table" then
+        db.professionPanel = {}
     end
     PrunePriceCache()
 end
@@ -1291,7 +1565,7 @@ local function CreateMainFrame()
 
     local helpText = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     helpText:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 16, -36)
-    helpText:SetText("Use o minimapa ou os botoes abaixo para escanear receitas.")
+    helpText:SetText("Use o minimapa/botoes para escanear. O painel de profissao pode ser arrastado.")
 
     local recipeLabel = mainFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     recipeLabel:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 16, -62)
@@ -1373,6 +1647,8 @@ local function CreateMainFrame()
             Print("Painel de profissao ocultado.")
         else
             professionPriceFrame:Show()
+            lastProfessionRecipeID = nil
+            lastProfessionAHOpen = nil
             UpdateProfessionPriceDisplay()
         end
     end)
@@ -1428,6 +1704,8 @@ local function ToggleProfessionPanel()
         Print("Painel de profissao ocultado.")
     else
         professionPriceFrame:Show()
+        lastProfessionRecipeID = nil
+        lastProfessionAHOpen = nil
         UpdateProfessionPriceDisplay()
     end
 end
@@ -1520,7 +1798,7 @@ SlashCmdList["AHCRAFTERPRICE"] = function(msg)
     rest = rest or ""
 
     if command == "" or command == "list" or command == "help" then
-        Print("Comandos: /craftprice ui | panel | scan <receita> | scanall | minimap show|hide | cache stats|clear")
+        Print("Comandos: /craftprice ui | panel [reset] | scan <receita> | scanall | minimap show|hide | cache stats|clear")
         local knownRecipes = GetKnownRecipes()
         if knownRecipes then
             Print("Receitas conhecidas no seu oficio:")
@@ -1535,7 +1813,25 @@ SlashCmdList["AHCRAFTERPRICE"] = function(msg)
     elseif command == "ui" or command == "toggle" then
         ToggleMainFrame()
     elseif command == "panel" then
-        ToggleProfessionPanel()
+        local option = string.lower(strtrim(rest))
+        if option == "reset" then
+            if not db then
+                EnsureDatabase()
+            end
+            local panelDB = EnsureProfessionPanelDB()
+            if panelDB then
+                panelDB.x = nil
+                panelDB.y = nil
+            end
+            CreateProfessionPriceFrame()
+            if professionPriceFrame then
+                local parent = professionPriceFrame:GetParent() or UIParent
+                ApplyProfessionPanelPosition(parent)
+            end
+            Print("Posicao do painel de profissao resetada.")
+        else
+            ToggleProfessionPanel()
+        end
     elseif command == "minimap" then
         if not db then
             EnsureDatabase()

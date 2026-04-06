@@ -1,17 +1,46 @@
 # AH Crafter Price
 
-Addon inicial para WoW Retail que calcula o custo de reagentes e preço do item craftado na Casa de Leilões.
+Addon para WoW Retail que estima custo de craft e margem de venda usando precos da Casa de Leiloes (AH).
 
-## Uso
-1. Coloque a pasta `AHCrafterPrice` em sua pasta `Interface/AddOns`.
-2. Abra o jogo e certifique-se de que o addon está ativado.
-3. Abra a Casa de Leilões.
-4. No chat, execute:
-   `/craftprice scan mochila de seda de fogo solar`
-5. Para escanear todas as receitas conhecidas no ofício de alfaiataria, abra a janela de Ofício/Profissão e execute:
-   `/craftprice scanall`
+## O que ele mostra
+- Custo total dos reagentes da receita.
+- Valor estimado do item craftado na AH.
+- Lucro ou perda provavel (`valor do item - custo de craft`).
+- Detalhe por reagente logo abaixo do resumo.
+- Progresso da busca em tempo real (ex.: reagentes consultados na AH).
+- Lista de reagentes em ordem alfabetica para leitura consistente.
 
-## Como adicionar receitas
+No painel de profissao, os 3 valores principais ficam destacados:
+- `Gasto crafting`
+- `Valor item AH`
+- `Lucro provavel` ou `Perda provavel`
+
+## Instalacao
+1. Coloque a pasta `AHCrafterPrice` em `Interface/AddOns`.
+2. Abra o jogo e confirme que o addon esta habilitado.
+3. Recarregue a UI (`/reload`) se necessario.
+
+## Uso rapido
+1. Abra a janela de Profissao e selecione uma receita.
+2. Abra a Casa de Leiloes para buscar precos ao vivo.
+3. Use `/craftprice panel` para exibir/ocultar o painel.
+4. Arraste o painel para onde preferir na tela (a posicao fica salva).
+
+Se a AH estiver fechada, o addon usa cache local e avisa quando a estimativa esta parcial ou com dados antigos.
+
+## Comandos
+- `/craftprice help`
+- `/craftprice ui`
+- `/craftprice panel`
+- `/craftprice panel reset` (reseta a posicao do painel de profissao)
+- `/craftprice scan <receita>`
+- `/craftprice scanall`
+- `/craftprice minimap show`
+- `/craftprice minimap hide`
+- `/craftprice cache stats`
+- `/craftprice cache clear`
+
+## Como adicionar receitas estaticas
 Edite `AHCrafterPrice.lua` e adicione entradas em `recipes`:
 
 ```lua
@@ -24,7 +53,7 @@ recipes["nome da receita"] = {
 }
 ```
 
-## Observações
-- Este addon usa a API clássica de leilão `QueryAuctionItems`.
-- Se você estiver em Retail ou em outra versão do WoW, a API de leilões pode ser diferente.
-- A ideia é mostrar o custo total dos reagentes e uma estimativa de margem de lucro.
+## Observacoes
+- O addon tenta usar a API de leilao adequada para Retail.
+- Resultados dependem dos dados disponiveis na AH e no cache.
+- Quando faltam precos de reagentes ou do item final, a margem pode ficar parcial.
